@@ -1,5 +1,7 @@
 mod bel;
 mod osc9;
+#[cfg(any(target_os = "android", test))]
+pub(crate) mod termux;
 
 use std::io;
 

@@ -329,3 +329,17 @@ CI leaves it unset so the cargo-backed guard still runs there.
   compilation signal at all**. The package builds; `rg` breaks at runtime on the device.
   The check is deliberately version-agnostic: pinning it to a ripgrep version would make
   it go stale at the next bump and stop guarding anything.
+### Patch #29 - Android interactive progress notifications
+
+- Files: `codex-rs/tui/src/notifications/termux*.rs`,
+  `codex-rs/tui/src/chatwidget/termux_progress*.rs`,
+  `codex-rs/tui/src/app/startup.rs`
+- Android-only Termux:API worker mirrors the displayed conversation's status,
+  pending interaction, and current plan count independently of OSC titles and
+  terminal focus. One process-owned notification is coalesced at one-second
+  intervals and removed at normal shutdown. Command timeouts kill the dedicated
+  helper process group; unavailable services disable further updates.
+- `CODEX_TERMUX_PROGRESS=0` opts out. No new Rust dependencies or upstream
+  configuration-schema changes are required.
+- Covered by notification argument snapshots, fake-helper worker tests, and a
+  ChatWidget turn/plan lifecycle regression test.

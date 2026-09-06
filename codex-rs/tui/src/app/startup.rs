@@ -714,10 +714,16 @@ See the Codex keymap documentation for supported actions and examples."
         #[cfg(debug_assertions)]
         let pre_loop_exit_reason: Option<ExitReason> = None;
 
+        #[cfg(target_os = "android")]
+        let termux_progress = crate::notifications::termux::TermuxProgress::from_env();
         let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
             Ok(exit_reason)
         } else {
             loop {
+                #[cfg(target_os = "android")]
+                if let Some(notifier) = &termux_progress {
+                    notifier.update(app.chat_widget.termux_progress());
+                }
                 if app.reconnect.offline && !app.reconnect.failed && reconnect.is_none() {
                     reconnect = Some(Box::pin(reconnect::reconnect(
                         app.app_server_target.clone(),
@@ -910,6 +916,10 @@ See the Codex keymap documentation for supported actions and examples."
                 }
             }
         };
+        #[cfg(target_os = "android")]
+        if let Some(notifier) = termux_progress {
+            notifier.shutdown().await;
+        }
         if let Err(err) = app_server.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");
         }

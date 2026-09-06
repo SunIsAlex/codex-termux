@@ -122,3 +122,37 @@ This project remains under the Apache 2.0 license inherited from OpenAI Codex.
 - Termux port: minimal Android compatibility patches
 
 See [LICENSE](./LICENSE).
+## Android progress notifications
+
+Interactive `codex`, `codex resume`, and `codex fork` can keep one Android
+notification updated with the displayed conversation's current status and plan
+step count (for example, `Running tests · Tasks 2/5`). Status updates work even
+when terminal-title updates or animations are disabled and while Termux is in
+the background, provided Android keeps its process running.
+
+Install the [Termux:API Android app](https://github.com/termux/termux-api) from
+the same source as Termux, allow its notifications in Android settings, then run:
+
+```sh
+pkg install termux-api
+termux-notification --id codex-test --title Codex --content 'Notifications work'
+termux-notification-remove codex-test
+codex
+```
+
+Progress notifications turn on automatically on native Android builds when
+`TERMUX_VERSION` is set and the notification commands are installed. To disable
+them for a session, run `CODEX_TERMUX_PROGRESS=0 codex`.
+
+The notification shows the project directory name and current status header.
+It uses a separate ID for each Codex process, updates at most once per second,
+and stays silent. Running work pins the notification; waiting for input and
+returning to `Ready` make it dismissible. `Ready` means the turn stopped, which
+also covers interrupted or failed turns. Codex removes the notification on
+normal exit. A missing or unresponsive Termux:API service disables updates for
+that process without blocking the conversation. Force-killing Codex can leave a
+notification behind. This integration covers the interactive TUI; `codex exec`
+and standalone app-server processes do not emit progress notifications.
+
+Task counts describe the current turn's explicit plan, not an estimated overall
+completion percentage. They are omitted until that turn provides a plan.

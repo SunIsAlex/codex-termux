@@ -388,6 +388,8 @@ use self::plan_implementation::PLAN_IMPLEMENTATION_TITLE;
 mod model_popup_state;
 mod model_popups;
 mod notifications;
+#[cfg(any(target_os = "android", test))]
+mod termux_progress;
 use self::notifications::Notification;
 mod permission_popups;
 mod permission_shortcuts;
