@@ -89,31 +89,43 @@ function detectSubcommands() {
 
 const args = process.argv.slice(2);
 const first = args[0];
-const isOption = first?.startsWith('-');
-const knownSubcommands = first && !isOption ? detectSubcommands() : null;
-const isKnownSubcommand = Boolean(first && knownSubcommands?.has(first));
+const webArgs = first === 'web' ? args.slice(1) : first === 'help' && args[1] === 'web' ? ['--help'] : null;
 
-const finalArgs =
-  args.length === 0
-    ? []
-    : isOption || isKnownSubcommand || knownSubcommands === null
-      ? args
-      : ['exec', ...args];
-
-const child = spawn(binaryPath, finalArgs, {
-  stdio: 'inherit',
-  env
-});
-
-child.on('error', (error) => {
-  console.error(`Failed to launch bundled Codex binary: ${error.message}`);
-  process.exit(1);
-});
-
-child.on('exit', (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
+if (webArgs) {
+  try {
+    const { start } = await import('../web-ui/server.mjs');
+    await start(webArgs);
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
   }
-  process.exit(code ?? 1);
-});
+} else {
+  const isOption = first?.startsWith('-');
+  const knownSubcommands = first && !isOption ? detectSubcommands() : null;
+  const isKnownSubcommand = Boolean(first && knownSubcommands?.has(first));
+
+  const finalArgs =
+    args.length === 0
+      ? []
+      : isOption || isKnownSubcommand || knownSubcommands === null
+        ? args
+        : ['exec', ...args];
+
+  const child = spawn(binaryPath, finalArgs, {
+    stdio: 'inherit',
+    env
+  });
+
+  child.on('error', (error) => {
+    console.error(`Failed to launch bundled Codex binary: ${error.message}`);
+    process.exit(1);
+  });
+
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exit(code ?? 1);
+  });
+}

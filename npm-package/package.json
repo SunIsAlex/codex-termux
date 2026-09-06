@@ -6,9 +6,12 @@
   "main": "bin/codex.js",
   "bin": {
     "codex": "bin/codex.js",
-    "codex-exec": "bin/codex-exec.js"
+    "codex-exec": "bin/codex-exec.js",
+    "codex-web": "bin/codex-web.js"
   },
   "files": [
+    "web-ui/",
+    "bin/codex-web.js",
     "bin/codex.js",
     "bin/codex-exec.js",
     "bin/codex",

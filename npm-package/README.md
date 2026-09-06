@@ -14,6 +14,24 @@ codex --version
 codex login
 ```
 
+## Lightweight Web GUI
+
+Launch the Android-friendly local Web UI from any project directory:
+
+```bash
+codex web
+```
+
+It opens the browser automatically and supports prompt input, image attachments,
+model selection, streaming output, and approvals. Use `--no-open` to only print
+the private local link, or `--port PORT` to choose a fixed loopback port.
+
+Existing threads resume normally in the Web UI, including after a restart.
+Only threads whose writer is held by another client open read-only; sending
+from one creates a separate branch. Refresh after that client releases the
+thread to resume the original. CLI and Web share authentication, configuration,
+and project files.
+
 ## Notes
 
 - Android 10+ / API 29+ on Termux ARM64 (the release binary is built for API 29)

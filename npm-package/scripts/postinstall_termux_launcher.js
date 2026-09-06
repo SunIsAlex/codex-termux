@@ -22,6 +22,7 @@ const shellInterpreter = path.join(path.dirname(nodeInterpreter), 'sh');
 const launcherPaths = [
   ['bin/codex.js', nodeInterpreter],
   ['bin/codex-exec.js', nodeInterpreter],
+  ['bin/codex-web.js', nodeInterpreter],
   ['bin/codex', shellInterpreter],
   ['bin/codex-exec', shellInterpreter],
 ];
