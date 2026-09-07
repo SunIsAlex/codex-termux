@@ -12,7 +12,7 @@ import { createNotifications } from './notifications.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const limit = 10 * 1024 * 1024;
-const allowed = new Set(['account/read', 'model/list', 'thread/list', 'thread/read', 'thread/turns/list', 'thread/items/list', 'thread/resume', 'thread/fork', 'thread/start', 'turn/start', 'turn/interrupt']);
+const allowed = new Set(['account/rateLimits/read', 'account/rateLimitResetCredit/consume', 'account/read', 'model/list', 'thread/list', 'thread/read', 'thread/turns/list', 'thread/items/list', 'thread/resume', 'thread/fork', 'thread/start', 'turn/start', 'turn/interrupt']);
 function options(args) {
   const result = { open: true, port: 0 };
   for (let index = 0; index < args.length; index++) {
@@ -88,7 +88,7 @@ export async function start(args = []) {
         res.setHeader('Set-Cookie', `codex_web=${cookie}; HttpOnly; SameSite=Strict; Path=/`);
         return reply(200, { ok: true });
       }
-      const asset = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/markdown.js': ['markdown.js', 'text/javascript'], '/vendor/marked.js': ['vendor/marked.js', 'text/javascript'], '/vendor/purify.js': ['vendor/purify.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] }[url.pathname];
+      const asset = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/usage.js': ['usage.js', 'text/javascript'], '/markdown.js': ['markdown.js', 'text/javascript'], '/vendor/marked.js': ['vendor/marked.js', 'text/javascript'], '/vendor/purify.js': ['vendor/purify.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] }[url.pathname];
       if (asset && req.method === 'GET') { res.setHeader('Content-Type', asset[1]); return res.end(await fs.readFile(join(here, asset[0]))); }
       if (!(req.headers.cookie || '').split(';').some(v => v.trim() === `codex_web=${cookie}`)) return reply(401, { error: '请使用 Termux 显示的启动链接打开' });
       if (req.method === 'GET' && url.pathname === '/session') return reply(200, { csrf, cwd: process.cwd() });

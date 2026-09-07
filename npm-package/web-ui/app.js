@@ -1,4 +1,5 @@
 import { markdown } from './markdown.js';
+import { setupUsage } from './usage.js';
 const $ = id => document.getElementById(id);
 const client = crypto.randomUUID();
 let csrf, thread = localStorage.getItem('codex-web-thread'), turn, busy = false, sending = false, connected = false, cursor, models = [], images = [];
@@ -20,6 +21,7 @@ async function post(path, body, binary = false) {
   const value = await response.json(); if (!response.ok) throw new Error(value.error || '请求失败'); return value;
 }
 const rpc = (method, params = {}, extra = {}) => post('/rpc', { method, params, ...extra });
+setupUsage(rpc);
 function state() { $('send').disabled = !connected || busy || sending || uncertain; $('model').disabled = !connected || busy || sending || uncertain || !models.length; $('effort').disabled = $('model').disabled; $('stop').hidden = !busy; text($('send'), readOnly ? '分支并发送' : '发送'); }
 function text(node, value) { node.textContent = value || ''; }
 function render(item) {
@@ -55,6 +57,11 @@ async function restore() {
   $('cwd').value = result.thread.cwd || $('cwd').value;
   text($('permissions'), readOnly ? '此会话正被其他客户端占用，当前只读；发送时创建独立分支。占用结束后刷新页面即可重试恢复原会话。' : '权限：' + JSON.stringify(result.approvalPolicy ?? '沿用配置') + ' / ' + JSON.stringify(result.sandbox ?? '沿用配置'));
   state();
+  // Wait for the restored history to be laid out before jumping to its end.
+  // Keep this out of historyPage so browsing older pages does not jump down.
+  requestAnimationFrame(() => {
+    if (thread === result.thread.id) $('messages').scrollTop = $('messages').scrollHeight;
+  });
 }
 async function list(reset = true) {
   if (reset) { cursor = null; $('threads').replaceChildren(); }
