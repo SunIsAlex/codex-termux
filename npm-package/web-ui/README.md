@@ -45,7 +45,9 @@ are remembered per model; reasoning transcript items are hidden.
 
 Current limitations: MCP elicitation supports scalar forms and URL authorization, while complex
 extension forms can be declined/cancelled. History loads
-100 items per page and retains at most 160 rendered items. Older stores without
+50 items initially and loads older pages automatically near the top, preserving
+the reading position. Loaded messages remain available for scrolling back down;
+offscreen message layout uses CSS content-visibility. Older stores without
 item pagination report an explicit error instead of loading unbounded history.
 Android resource measurements remain pending.
 

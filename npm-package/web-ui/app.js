@@ -4,17 +4,48 @@ const $ = id => document.getElementById(id);
 const client = crypto.randomUUID();
 let csrf, thread = localStorage.getItem('codex-web-thread'), turn, busy = false, sending = false, connected = false, cursor, models = [], images = [];
 const items = new Map();
-let historyCursor;
+let historyCursor, historyLoading = false, historyGeneration = 0, renderingHistory = false;
 let uncertain = false;
 let readOnly = false;
-const older = document.createElement('button'); text(older, '查看更早记录'); older.hidden = true; $('messages').before(older);
-async function historyPage(cursor = null) {
-  const page = await rpc('thread/items/list', { threadId: thread, limit: 100, sortDirection: 'desc', cursor });
-  items.clear(); $('messages').replaceChildren();
-  for (const entry of page.data.reverse()) render(entry.item);
-  historyCursor = page.nextCursor; older.hidden = !historyCursor;
+async function historyPage({ reset = false } = {}) {
+  if (!thread || (!reset && (historyLoading || !historyCursor))) return;
+  if (reset) { historyGeneration++; historyCursor = null; }
+  const generation = historyGeneration, targetThread = thread;
+  historyLoading = true;
+  $('messages').setAttribute('aria-busy', 'true');
+  try {
+    const page = await rpc('thread/items/list', { threadId: targetThread, limit: 50, sortDirection: 'desc', cursor: reset ? null : historyCursor });
+    if (generation !== historyGeneration || targetThread !== thread) return;
+    const container = $('messages');
+    const anchor = [...container.children].find(row => row.getBoundingClientRect().bottom > container.getBoundingClientRect().top);
+    const anchorTop = anchor?.getBoundingClientRect().top;
+    const first = container.firstChild;
+    renderingHistory = true;
+    try {
+      for (const entry of page.data.reverse()) {
+        // Streaming events may already have supplied a newer copy of this item.
+        if (items.has(entry.item.id)) continue;
+        render(entry.item);
+        const row = items.get(entry.item.id);
+        if (row) container.insertBefore(row, first);
+      }
+    } finally { renderingHistory = false; }
+    historyCursor = page.nextCursor;
+    if (reset) container.scrollTop = container.scrollHeight;
+    else if (anchor) container.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
+  } finally {
+    if (generation === historyGeneration && targetThread === thread) {
+      historyLoading = false; $('messages').setAttribute('aria-busy', 'false');
+      // Hidden reasoning-only pages or short messages may not fill a viewport.
+      requestAnimationFrame(() => {
+        if (generation === historyGeneration && targetThread === thread && historyCursor && $('messages').scrollHeight <= $('messages').clientHeight) historyPage().catch(fail);
+      });
+    }
+  }
 }
-older.onclick = () => { if (busy) return fail(new Error('任务完成后可浏览更早记录')); historyPage(historyCursor).catch(fail); };
+$('messages').addEventListener('scroll', () => {
+  if ($('messages').scrollTop < 240) historyPage().catch(fail);
+}, { passive: true });
 const fail = error => { $('error').textContent = error.message; };
 async function post(path, body, binary = false) {
   const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': binary ? 'application/octet-stream' : 'application/json', 'X-CSRF-Token': csrf || '', 'X-Client-Id': client }, body: binary ? body : JSON.stringify(body) });
@@ -26,6 +57,7 @@ function state() { $('send').disabled = !connected || busy || sending || uncerta
 function text(node, value) { node.textContent = value || ''; }
 function render(item) {
   if (item.type === 'reasoning') return;
+  const follow = !renderingHistory && $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
   let row = items.get(item.id);
   if (!row) { row = document.createElement('article'); row.className = item.type; items.set(item.id, row); $('messages').append(row); }
   if (item.type === 'agentMessage') { row.dataset.raw = item.text || ''; markdown(row, item.text || ''); }
@@ -43,16 +75,19 @@ function render(item) {
     row.replaceChildren(); const detail = document.createElement('details'), summary = document.createElement('summary'), pre = document.createElement('pre');
     text(summary, `${item.type} · ${item.status || ''}`); text(pre, JSON.stringify(item, null, 2).slice(0, 16000)); detail.append(summary, pre); row.append(detail);
   }
-  while (items.size > 160) { const key = items.keys().next().value; items.get(key).remove(); items.delete(key); }
-  if ($('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 500) row.scrollIntoView({ block: 'end' });
+  if (follow) $('messages').scrollTop = $('messages').scrollHeight;
 }
 async function restore() {
   if (!thread) return;
-  const result = await rpc('thread/resume', { threadId: thread, excludeTurns: true, initialTurnsPage: { limit: 20, sortDirection: 'desc', itemsView: 'summary' } });
+  const targetThread = thread, generation = ++historyGeneration;
+  historyCursor = null; historyLoading = false;
+  const result = await rpc('thread/resume', { threadId: targetThread, excludeTurns: true, initialTurnsPage: { limit: 20, sortDirection: 'desc', itemsView: 'summary' } });
+  if (thread !== targetThread || generation !== historyGeneration) return;
   readOnly = !!result.webReadOnly;
   items.clear(); $('messages').replaceChildren();
   const turns = result.initialTurnsPage?.data || [];
-  await historyPage();
+  await historyPage({ reset: true });
+  if (thread !== targetThread) return;
   const active = turns.find(t => t.status === 'inProgress'); turn = active?.id; busy = !!active;
   $('cwd').value = result.thread.cwd || $('cwd').value;
   text($('permissions'), readOnly ? '此会话正被其他客户端占用，当前只读；发送时创建独立分支。占用结束后刷新页面即可重试恢复原会话。' : '权限：' + JSON.stringify(result.approvalPolicy ?? '沿用配置') + ' / ' + JSON.stringify(result.sandbox ?? '沿用配置'));
@@ -144,7 +179,7 @@ $('stop').onclick = () => rpc('turn/interrupt', { threadId: thread, turnId: turn
 $('historyButton').onclick = () => { $('history').hidden = !$('history').hidden; if (!$('history').hidden) list().catch(fail); };
 $('settingsButton').onclick = () => { $('settings').hidden = !$('settings').hidden; };
 $('more').onclick = () => list(false).catch(fail);
-const fresh = () => { if (busy) return fail(new Error('请先停止当前任务')); thread = null; readOnly = false; state(); localStorage.removeItem('codex-web-thread'); items.clear(); $('messages').replaceChildren(); $('requests').replaceChildren(); $('history').hidden = true; };
+const fresh = () => { if (busy) return fail(new Error('请先停止当前任务')); thread = null; historyGeneration++; historyCursor = null; historyLoading = false; $('messages').setAttribute('aria-busy', 'false'); readOnly = false; state(); localStorage.removeItem('codex-web-thread'); items.clear(); $('messages').replaceChildren(); $('requests').replaceChildren(); $('history').hidden = true; };
 $('newThread').onclick = fresh; $('project').onclick = () => { if (busy || sending) return fail(new Error('请先完成当前任务')); fresh(); const paths = [...new Set([$('cwd').value, ...JSON.parse(localStorage.getItem('codex-web-projects') || '[]')])].slice(0, 10); localStorage.setItem('codex-web-projects', JSON.stringify(paths)); $('recent').replaceChildren(...paths.map(p => new Option(p, p))); $('settings').hidden = true; };
 $('cleanup').onclick = () => { if (busy || sending) return fail(new Error('任务完成后才能清理图片')); if (confirm('删除全部上传图片？历史图片将不可用。')) post('/cleanup', {}).catch(fail); };
 function selectModel() {
