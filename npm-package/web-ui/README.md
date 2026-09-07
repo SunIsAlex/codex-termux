@@ -31,8 +31,13 @@ conversation. Both clients can still modify the same project files.
 After an uncertain submission timeout, refresh and inspect the conversation before
 resending. API credentials never enter the browser.
 
-Current limitations: Markdown rendering supports fenced code blocks and plain
-text; MCP elicitation supports scalar forms and URL authorization, while complex
+Markdown supports headings, emphasis, lists, tables, quotes, links and code blocks
+with copy buttons. Marked 15.0.12 and DOMPurify 3.3.3 are bundled locally in
+`vendor/` with their licenses; no CDN is contacted by the browser. HTML is sanitized
+and remote images are not embedded. Effort options follow the model catalog and
+are remembered per model; reasoning transcript items are hidden.
+
+Current limitations: MCP elicitation supports scalar forms and URL authorization, while complex
 extension forms can be declined/cancelled. History loads
 100 items per page and retains at most 160 rendered items. Older stores without
 item pagination report an explicit error instead of loading unbounded history.

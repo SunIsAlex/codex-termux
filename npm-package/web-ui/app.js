@@ -1,3 +1,4 @@
+import { markdown } from './markdown.js';
 const $ = id => document.getElementById(id);
 const client = crypto.randomUUID();
 let csrf, thread = localStorage.getItem('codex-web-thread'), turn, busy = false, sending = false, connected = false, cursor, models = [], images = [];
@@ -19,22 +20,10 @@ async function post(path, body, binary = false) {
   const value = await response.json(); if (!response.ok) throw new Error(value.error || '请求失败'); return value;
 }
 const rpc = (method, params = {}, extra = {}) => post('/rpc', { method, params, ...extra });
-function state() { $('send').disabled = !connected || busy || sending || uncertain; $('model').disabled = !connected || busy || sending || uncertain || !models.length; $('stop').hidden = !busy; text($('send'), readOnly ? '分支并发送' : '发送'); }
+function state() { $('send').disabled = !connected || busy || sending || uncertain; $('model').disabled = !connected || busy || sending || uncertain || !models.length; $('effort').disabled = $('model').disabled; $('stop').hidden = !busy; text($('send'), readOnly ? '分支并发送' : '发送'); }
 function text(node, value) { node.textContent = value || ''; }
-// Deliberately small Markdown subset. Never interpret model output as HTML.
-function markdown(node, value) {
-  node.replaceChildren();
-  value.split('```').forEach((part, index) => {
-    if (index % 2) {
-      const pre = document.createElement('pre'), button = document.createElement('button');
-      const code = part.replace(/^[^\n]*\n/, ''); text(pre, code); text(button, '复制代码');
-      button.onclick = () => navigator.clipboard.writeText(code).catch(fail); node.append(button, pre);
-    } else {
-      const span = document.createElement('span'); text(span, part); node.append(span);
-    }
-  });
-}
 function render(item) {
+  if (item.type === 'reasoning') return;
   let row = items.get(item.id);
   if (!row) { row = document.createElement('article'); row.className = item.type; items.set(item.id, row); $('messages').append(row); }
   if (item.type === 'agentMessage') { row.dataset.raw = item.text || ''; markdown(row, item.text || ''); }
@@ -135,6 +124,7 @@ $('composer').onsubmit = async event => {
     const ids = []; for (const image of images) { if (!image.id) image.id = (await post('/upload', image.file, true)).id; ids.push(image.id); }
     const params = { threadId: thread, input: prompt ? [{ type: 'text', text: prompt }] : [], clientUserMessageId: crypto.randomUUID() };
     if ($('model').value) params.model = $('model').value;
+    if ($('effort').value) params.effort = $('effort').value;
     uncertain = true;
     const result = await rpc('turn/start', params, { images: ids }); uncertain = false; turn = result.turn.id; busy = result.turn.status === 'inProgress';
     $('prompt').value = ''; localStorage.removeItem('codex-web-draft'); images.forEach(i => URL.revokeObjectURL(i.preview)); images = []; previews();
@@ -157,7 +147,19 @@ function selectModel() {
   const model = models.find(candidate => candidate.id === selected);
   text($('modelDescription'), model?.description || '未指定模型时，Codex 使用配置中的默认模型。');
   $('model').title = model?.description || '';
+  const effective = model || models.find(candidate => candidate.isDefault);
+  $('effort').replaceChildren(new Option('沿用会话 / 配置', ''));
+  for (const option of effective?.supportedReasoningEfforts || []) {
+    const entry = new Option(option.reasoningEffort, option.reasoningEffort);
+    entry.title = option.description; $('effort').append(entry);
+  }
+  const saved = localStorage.getItem('codex-web-effort:' + (effective?.id || 'default'));
+  $('effort').value = [...$('effort').options].some(option => option.value === saved) ? saved : '';
 }
+$('effort').onchange = () => {
+  const model = models.find(candidate => candidate.id === $('model').value) || models.find(candidate => candidate.isDefault);
+  localStorage.setItem('codex-web-effort:' + (model?.id || 'default'), $('effort').value);
+};
 $('model').onchange = selectModel;
 function populateModels(data) {
   models = data;
