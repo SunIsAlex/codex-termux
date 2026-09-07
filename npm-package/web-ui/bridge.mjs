@@ -46,6 +46,7 @@ export class Bridge {
     const request = this.requests.get(String(id));
     if (!request) throw new Error('请求已处理或失效');
     this.write({ id: request.id, result }); this.requests.delete(String(id));
+    this.publish({ method: 'serverRequest/resolved', params: { requestId: request.id } });
   }
   unsupported(id) {
     this.write({ id, error: { code: -32601, message: 'This GUI does not support this interaction' } });

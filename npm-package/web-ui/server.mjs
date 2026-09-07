@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { Bridge } from './bridge.mjs';
+import { createNotifications } from './notifications.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const limit = 10 * 1024 * 1024;
@@ -61,11 +62,13 @@ export async function start(args = []) {
   const csrf = randomBytes(32).toString('hex');
   let origin, stream, owner, lastSeen = 0, eventId = 0, bridge;
   const events = []; let eventBytes = 0;
+  const notifications = createNotifications();
   const publish = message => {
     if (message.id !== undefined && message.method && !['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/tool/requestUserInput', 'tool/requestUserInput', 'mcpServer/elicitation/request'].includes(message.method)) {
       queueMicrotask(() => bridge.unsupported(message.id));
       message = { method: 'bridge/unsupported', params: { message: `不支持的交互：${message.method}` } };
     }
+    notifications?.event(message);
     const data = JSON.stringify(message);
     const event = `id: ${++eventId}\ndata: ${data}\n\n`;
     events.push(event); eventBytes += Buffer.byteLength(event);
@@ -169,6 +172,6 @@ export async function start(args = []) {
   origin = `http://127.0.0.1:${server.address().port}`;
   const link = `${origin}/#${bootToken}`; console.log(`Codex Web: ${link}`);
   if (launch.open) { const opener = spawn('termux-open-url', [link], { stdio: 'ignore' }); opener.on('error', () => {}); opener.unref(); }
-  const stop = () => { stream?.end(); server.close(); bridge.close(); };
+  const stop = () => { stream?.end(); server.close(); bridge.close(); void notifications?.close(); };
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
 }

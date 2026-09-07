@@ -21,6 +21,12 @@ panel can permanently delete all uploaded images, including historical images.
 
 One page controls the service at a time. Closing the browser does not terminate
 Codex; Android can still kill Termux. Stop the service with Ctrl+C in Termux.
+Web also emits the fork's Termux:API work-status notification (working, waiting
+for input, plan progress, ready). It uses a separate notification ID from the
+TUI and removes it when the service stops. The same prerequisites as the CLI
+apply: Termux:API Android app and `termux-api` commands. Set
+`CODEX_TERMUX_PROGRESS=0` to disable it. Updates are coalesced to one per second;
+API failures disable notifications without blocking the Web service.
 Termux CLI and Web may run simultaneously. Existing threads first attempt normal
 resume, including after restarting the Web service. Only an active writer conflict
 falls back to read-only history and “分支并发送”; submitting then creates a separate
