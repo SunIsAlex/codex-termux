@@ -39,7 +39,10 @@ export class ProgressNotifications {
     const args = ['--id', this.id, '--title', clean(`Codex Web · ${basename(process.cwd())}`), '--content', clean(status), '--priority', 'low', '--alert-once'];
     if (current && !waiting) args.push('--ongoing');
     this.pending = args;
-    if (!this.worker) this.worker = this.flush();
+    // Assign the promise before flush can finish synchronously on a duplicate.
+    // Otherwise its finally clears worker before this assignment restores a
+    // settled promise, leaving all subsequent updates permanently queued.
+    if (!this.worker) this.worker = Promise.resolve().then(() => this.flush());
   }
 
   async flush() {

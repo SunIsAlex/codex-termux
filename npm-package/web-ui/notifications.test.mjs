@@ -44,3 +44,21 @@ test('unavailable API disables notifications without rejecting event processing'
   notifier.event({ method: 'turn/started', params: { threadId: 'b' } });
   assert.deepEqual(calls, ['notify', 'remove']);
 });
+
+test('Ready is delivered after a duplicate Working update finishes synchronously', async () => {
+  const contents = [];
+  const notifier = new ProgressNotifications('notify', 'remove', async (command, args) => {
+    if (command === 'notify') contents.push(args[args.indexOf('--content') + 1]);
+  });
+  notifier.event({ method: 'turn/started', params: { threadId: 'a' } });
+  await notifier.worker;
+  // An unrecognized item keeps the status at Working, triggering deduplication
+  // while no previous worker is running.
+  notifier.event({ method: 'item/started', params: { threadId: 'a', item: { type: 'other' } } });
+  await notifier.worker;
+  assert.equal(notifier.worker, null);
+  notifier.event({ method: 'turn/completed', params: { threadId: 'a' } });
+  await notifier.worker;
+  assert.deepEqual(contents, ['Working', 'Ready']);
+  await notifier.close();
+});
