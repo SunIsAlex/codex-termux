@@ -49,18 +49,18 @@ $('messages').addEventListener('scroll', () => {
 const fail = error => { $('error').textContent = error.message; };
 async function post(path, body, binary = false) {
   const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': binary ? 'application/octet-stream' : 'application/json', 'X-CSRF-Token': csrf || '', 'X-Client-Id': client }, body: binary ? body : JSON.stringify(body) });
-  const value = await response.json(); if (!response.ok) throw new Error(value.error || '请求失败'); return value;
+  const value = await response.json(); if (!response.ok) throw Object.assign(new Error(value.error || '请求失败'), { turnNotSubmitted: value.turnNotSubmitted === true }); return value;
 }
 const rpc = (method, params = {}, extra = {}) => post('/rpc', { method, params, ...extra });
 setupUsage(rpc);
-function state() { $('send').disabled = !connected || busy || sending || uncertain; $('model').disabled = !connected || busy || sending || uncertain || !models.length; $('effort').disabled = $('model').disabled; $('stop').hidden = !busy; text($('send'), readOnly ? '分支并发送' : '发送'); }
+function state() { $('send').disabled = !connected || busy || sending || uncertain; $('model').disabled = !connected || busy || sending || uncertain || !models.length; $('effort').disabled = $('model').disabled; $('mode').disabled = !connected || busy || sending || uncertain; $('stop').hidden = !busy; text($('send'), readOnly ? '分支并发送' : '发送'); }
 function text(node, value) { node.textContent = value || ''; }
 function render(item) {
   if (item.type === 'reasoning') return;
   const follow = !renderingHistory && $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
   let row = items.get(item.id);
   if (!row) { row = document.createElement('article'); row.className = item.type; items.set(item.id, row); $('messages').append(row); }
-  if (item.type === 'agentMessage') { row.dataset.raw = item.text || ''; markdown(row, item.text || ''); }
+  if (item.type === 'agentMessage' || item.type === 'plan') { row.dataset.raw = item.text || ''; markdown(row, item.text || ''); }
   else if (item.type === 'userMessage') {
     row.replaceChildren();
     for (const input of item.content || []) {
@@ -168,11 +168,13 @@ $('composer').onsubmit = async event => {
     if ($('model').value) params.model = $('model').value;
     if ($('effort').value) params.effort = $('effort').value;
     uncertain = true;
-    const result = await rpc('turn/start', params, { images: ids }); uncertain = false; turn = result.turn.id; busy = result.turn.status === 'inProgress';
+    const result = await rpc('turn/start', params, { images: ids, webMode: $('mode').value }); uncertain = false; turn = result.turn.id; busy = result.turn.status === 'inProgress';
     $('prompt').value = ''; localStorage.removeItem('codex-web-draft'); images.forEach(i => URL.revokeObjectURL(i.preview)); images = []; previews();
-  } catch (e) { fail(new Error(e.message + (uncertain ? '。发送状态不确定，请刷新核对历史后再操作。' : ''))); } finally { sending = false; state(); }
+  } catch (e) { if (e.turnNotSubmitted) uncertain = false; fail(new Error(e.message + (uncertain ? '。发送状态不确定，请刷新核对历史后再操作。' : ''))); } finally { sending = false; state(); }
 };
 $('prompt').value = localStorage.getItem('codex-web-draft') || '';
+$('mode').value = localStorage.getItem('codex-web-mode') === 'plan' ? 'plan' : 'default';
+$('mode').onchange = () => localStorage.setItem('codex-web-mode', $('mode').value);
 $('prompt').oninput = () => localStorage.setItem('codex-web-draft', $('prompt').value);
 $('prompt').onkeydown = e => { if (e.ctrlKey && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('composer').requestSubmit(); } };
 $('stop').onclick = () => rpc('turn/interrupt', { threadId: thread, turnId: turn }).catch(fail);
@@ -234,7 +236,7 @@ async function init() {
     if (message.method === 'turn/started') { turn = p.turn.id; busy = true; state(); }
     if (message.method === 'turn/completed') { busy = false; state(); if (p.turn.error) fail(new Error(p.turn.error.message)); }
     if (message.method === 'item/started' || message.method === 'item/completed') render(p.item);
-    if (message.method === 'item/agentMessage/delta') { const row = items.get(p.itemId); const value = (row?.dataset.raw || '') + p.delta; render({ id: p.itemId, type: 'agentMessage', text: value }); items.get(p.itemId).dataset.raw = value; }
+    if (message.method === 'item/agentMessage/delta' || message.method === 'item/plan/delta') { const row = items.get(p.itemId); const value = (row?.dataset.raw || '') + p.delta; render({ id: p.itemId, type: message.method === 'item/plan/delta' ? 'plan' : 'agentMessage', text: value }); items.get(p.itemId).dataset.raw = value; }
   };
 }
 init().catch(fail);

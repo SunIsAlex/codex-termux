@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ChatGPT Phone Bridge</string>
+    <string name="accessibility_description">将语音命令发送到 ChatGPT，并读取带随机校验码的白名单动作回复。不会读取登录凭证或拦截网络。</string>
+</resources>

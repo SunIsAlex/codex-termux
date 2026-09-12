@@ -52,3 +52,8 @@ item pagination report an explicit error instead of loading unbounded history.
 Android resource measurements remain pending.
 
 No test or build commands were run for this implementation, as requested.
+Select Plan above the composer to use Codex built-in planning instructions.
+The selection is remembered; choose Default before sending an implementation
+request to leave Plan mode. Plan defaults to medium effort unless explicitly
+overridden. Plan messages render as Markdown, and clarification questions use
+the existing user-input controls.

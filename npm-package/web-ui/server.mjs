@@ -47,6 +47,7 @@ export async function start(args = []) {
   const attachments = new Map();
   // Track successful writer acquisition, including restored threads.
   const ownedThreads = new Set();
+  const threadSettings = new Map();
   for (const name of await fs.readdir(root)) {
     if (!/^[a-f0-9-]+\.json$/.test(name)) continue;
     try {
@@ -77,6 +78,7 @@ export async function start(args = []) {
   };
   const save = async id => fs.writeFile(join(root, id + '.json'), JSON.stringify(attachments.get(id)), { mode: 0o600 });
   const server = http.createServer(async (req, res) => {
+    let turnSubmitted = false;
     const reply = (status, value) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
     try {
       if (req.headers.host !== new URL(origin).host) return reply(403, { error: 'Invalid host' });
@@ -132,6 +134,7 @@ export async function start(args = []) {
         try {
           const result = await bridge.call('thread/resume', params);
           ownedThreads.add(result.thread.id);
+          threadSettings.set(result.thread.id, { model: result.model, reasoningEffort: result.reasoningEffort });
           return reply(200, { ...result, webReadOnly: false });
         } catch (error) {
           ownedThreads.delete(params.threadId);
@@ -150,6 +153,19 @@ export async function start(args = []) {
         if (!(await fs.stat(params.cwd)).isDirectory()) throw new Error('项目路径不是目录');
       }
       if (body.method === 'turn/start') {
+        if (body.webMode !== undefined) {
+          if (!['default', 'plan'].includes(body.webMode)) throw new Error('无效的协作模式');
+          const current = threadSettings.get(params.threadId);
+          if (!current?.model) throw new Error('会话模型设置不可用，请重新打开会话');
+          params.collaborationMode = {
+            mode: body.webMode,
+            settings: {
+              model: params.model || current.model,
+              reasoning_effort: params.effort || (body.webMode === 'plan' ? 'medium' : current.reasoningEffort ?? null),
+              developer_instructions: null,
+            },
+          };
+        }
         const ids = body.images || []; if (!Array.isArray(ids) || ids.length > 4) throw new Error('最多 4 张图片');
         if (!Array.isArray(params.input) || params.input.some(i => i.type !== 'text' || typeof i.text !== 'string')) throw new Error('输入格式无效');
         for (const id of ids) {
@@ -157,10 +173,21 @@ export async function start(args = []) {
           entry.sent = true; await save(id); params.input.push({ type: 'localImage', path: join(root, id) });
         }
       }
+      turnSubmitted = body.method === 'turn/start';
       const result = await bridge.call(body.method, params);
-      if (body.method === 'thread/start' || body.method === 'thread/fork') ownedThreads.add(result.thread.id);
+      if (body.method === 'thread/start' || body.method === 'thread/fork') {
+        ownedThreads.add(result.thread.id);
+        threadSettings.set(result.thread.id, { model: result.model, reasoningEffort: result.reasoningEffort });
+      }
+      if (body.method === 'turn/start') {
+        const current = threadSettings.get(params.threadId);
+        threadSettings.set(params.threadId, {
+          model: params.collaborationMode?.settings.model || params.model || current?.model,
+          reasoningEffort: params.collaborationMode?.settings.reasoning_effort ?? params.effort ?? current?.reasoningEffort,
+        });
+      }
       return reply(200, result);
-    } catch (error) { if (!res.headersSent && !res.destroyed) reply(400, { error: error.message }); }
+    } catch (error) { if (!res.headersSent && !res.destroyed) reply(400, { error: error.message, turnNotSubmitted: !turnSubmitted }); }
   });
   const launcher = join(here, '..', 'bin', 'codex.js');
   const bundled = await fs.access(join(here, '..', 'bin', 'codex.bin')).then(() => true, () => false);
