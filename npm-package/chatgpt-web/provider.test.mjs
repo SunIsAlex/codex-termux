@@ -37,9 +37,11 @@ test('parses connected and unauthorized adb devices', () => {
 
 test('reads the upstream reversible-route journal', async () => {
   const root = await mkdtemp(join(tmpdir(), 'chatgpt-web-journal-'));
-  const location = { journal: join(root, 'journal.json') };
+  const location = { journal: join(root, 'journal.json'), codexConfig: join(root, 'config.toml') };
   assert.equal(await routeActive(location), false);
-  await writeFile(location.journal, JSON.stringify({ active: true }));
+  await writeFile(location.journal, JSON.stringify({ active: true, installed: { openai_base_url: 'http://127.0.0.1:17841/v1' } }));
+  assert.equal(await routeActive(location), false);
+  await writeFile(location.codexConfig, 'openai_base_url = "http://127.0.0.1:17841/v1"\n[projects.test]\n');
   assert.equal(await routeActive(location), true);
   await writeFile(location.journal, JSON.stringify({ active: false }));
   assert.equal(await routeActive(location), false);

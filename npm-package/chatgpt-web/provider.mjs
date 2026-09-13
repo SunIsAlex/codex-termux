@@ -18,6 +18,7 @@ function paths(env = process.env) {
   return {
     codexHome,
     providerHome,
+    codexConfig: join(codexHome, 'config.toml'),
     runtime: join(codexHome, 'providers', `codex-chatgpt-web-${version}`),
     config: join(providerHome, 'config.json'),
     journal: join(providerHome, 'codex', 'integration-journal.json'),
@@ -311,7 +312,15 @@ async function prepareAndroidChrome({ env = process.env, serial, port } = {}) {
   }
   if (!devices.some(device => device.serial === serial)) throw new Error(`ADB 设备未连接：${serial}`);
   captured(adb, ['-s', serial, 'forward', `tcp:${port}`, 'localabstract:chrome_devtools_remote'], { env });
-  const cdp = await cdpHealth(port);
+  let cdp = await cdpHealth(port);
+  if (!cdp) {
+    captured(adb, ['-s', serial, 'shell', 'monkey', '-p', 'com.android.chrome', '-c', 'android.intent.category.LAUNCHER', '1'], { env });
+    const deadline = Date.now() + 10_000;
+    while (!cdp && Date.now() < deadline) {
+      await new Promise(resolveWait => setTimeout(resolveWait, 500));
+      cdp = await cdpHealth(port);
+    }
+  }
   if (!cdp) throw new Error('无法连接 Android Chrome 调试端口；请保持 Chrome 打开，并确认无线调试已启用');
   await mkdir(location.providerHome, { recursive: true, mode: 0o700 });
   await writeFile(location.termux, `${JSON.stringify({ ...saved, androidChrome: { adbSerial: serial, cdpPort: port } })}\n`, { mode: 0o600 });
@@ -340,9 +349,21 @@ async function readConfig(location = paths()) {
   catch { return null; }
 }
 
+async function integrationRouteState(location = paths()) {
+  try {
+    const journal = JSON.parse(await readFile(location.journal, 'utf8'));
+    if (journal.active !== true) return { expected: false, active: false };
+    const config = await readFile(location.codexConfig, 'utf8');
+    const lines = config.split(/\r?\n/);
+    const firstTable = lines.findIndex(line => /^\s*\[/.test(line));
+    const topLevel = firstTable < 0 ? lines : lines.slice(0, firstTable);
+    const expected = `openai_base_url = ${JSON.stringify(journal.installed?.openai_base_url)}`;
+    return { expected: true, active: topLevel.some(line => line.trim() === expected) };
+  } catch { return { expected: false, active: false }; }
+}
+
 export async function routeActive(location = paths()) {
-  try { return JSON.parse(await readFile(location.journal, 'utf8')).active === true; }
-  catch { return false; }
+  return (await integrationRouteState(location)).active;
 }
 
 async function health(config) {
@@ -365,11 +386,11 @@ export async function startProvider({ env = process.env, quiet = false } = {}) {
   if (!bunPath) throw new Error('缺少 Bun，请先执行 pkg install bun');
   const config = await readConfig(location);
   if (!config) throw new Error('ChatGPT Web Provider 尚未配置；请执行 codex chatgpt-web setup');
-  const termux = await readTermux(location);
-  if (termux.androidChrome) await prepareAndroidChrome({ env });
   const current = await health(config);
   if (current?.accepting_turns) return current;
   if (current) throw new Error('ChatGPT Web Provider 正在停止，请稍后重试');
+  const termux = await readTermux(location);
+  if (termux.androidChrome) await prepareAndroidChrome({ env });
 
   await mkdir(location.logs, { recursive: true, mode: 0o700 });
   const log = await open(join(location.logs, 'termux-daemon.log'), 'a', 0o600);
@@ -409,7 +430,11 @@ async function stopProvider({ env = process.env } = {}) {
 
 export async function ensureProvider({ env = process.env } = {}) {
   const location = paths(env);
-  if (!await routeActive(location)) return null;
+  const route = await integrationRouteState(location);
+  if (route.expected && !route.active) {
+    throw new Error('ChatGPT Web 路由配置已漂移；请执行 codex chatgpt-web setup --android-chrome --replace-codex-route');
+  }
+  if (!route.active) return null;
   return startProvider({ env, quiet: true });
 }
 
@@ -466,7 +491,8 @@ export async function main(args = process.argv.slice(2), { env = process.env } =
     if (args.length) throw new Error('status 不接受其他参数');
     const location = paths(env), config = await readConfig(location), running = await health(config);
     const termux = await readTermux(location);
-    console.log(JSON.stringify({ installed: await installed(location), configured: Boolean(config), routeActive: await routeActive(location), running: Boolean(running), androidChrome: termux.androidChrome || null, health: running }, null, 2)); return;
+    const route = await integrationRouteState(location);
+    console.log(JSON.stringify({ installed: await installed(location), configured: Boolean(config), routeExpected: route.expected, routeActive: route.active, running: Boolean(running), androidChrome: termux.androidChrome || null, health: running }, null, 2)); return;
   }
   if (command === 'doctor') { await providerCommand(['doctor', ...args], { env }); return; }
   if (command === 'route') { await providerCommand(['route', ...args], { env }); return; }
