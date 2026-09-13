@@ -47,6 +47,19 @@ codex chatgpt-web setup
 codex chatgpt-web status
 ```
 
+To reuse the session already signed in within Android Chrome, enable Android Wireless debugging,
+pair/connect Termux's `adb`, keep Chrome open, and run:
+
+```sh
+adb pair PHONE_IP:PAIRING_PORT
+adb connect PHONE_IP:DEBUG_PORT
+codex chatgpt-web setup --android-chrome
+```
+
+This mode attaches through an ADB-forwarded Chrome DevTools connection. It does not copy or persist
+Chrome cookies. The forwarding is restored automatically when the provider starts; after a reboot,
+Android may require a new `adb connect` using the current Wireless debugging port.
+
 Get the companion Android app from the
 [Termux:X11 releases](https://github.com/termux/termux-x11/releases).
 
