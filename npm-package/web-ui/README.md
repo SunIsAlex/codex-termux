@@ -21,6 +21,10 @@ panel can permanently delete all uploaded images, including historical images.
 
 One page controls the service at a time. Closing the browser does not terminate
 Codex; Android can still kill Termux. Stop the service with Ctrl+C in Termux.
+If the underlying `codex app-server` exits after a network failure, Web keeps
+running and restarts it with bounded exponential backoff. The open page restores
+its thread state after the replacement process is ready. An
+app-server that stops answering RPC requests is recycled through the same path.
 Web also emits the fork's Termux:API work-status notification (working, waiting
 for input, plan progress, ready). It uses a separate notification ID from the
 TUI and removes it when the service stops. The same prerequisites as the CLI

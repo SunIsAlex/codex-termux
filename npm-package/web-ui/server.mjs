@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { Bridge } from './bridge.mjs';
+import { BridgeController } from './bridge.mjs';
 import { createNotifications } from './notifications.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -66,7 +66,7 @@ export async function start(args = []) {
   const notifications = createNotifications();
   const publish = message => {
     if (message.id !== undefined && message.method && !['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/tool/requestUserInput', 'tool/requestUserInput', 'mcpServer/elicitation/request'].includes(message.method)) {
-      queueMicrotask(() => bridge.unsupported(message.id));
+      queueMicrotask(() => { try { bridge.unsupported(message.id); } catch { /* The restarted process no longer owns this request. */ } });
       message = { method: 'bridge/unsupported', params: { message: `不支持的交互：${message.method}` } };
     }
     notifications?.event(message);
@@ -100,7 +100,10 @@ export async function start(args = []) {
         owner = client; lastSeen = Date.now(); stream?.end(); stream = res;
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
         // Reconcile authoritative state on every reconnect rather than replaying partial deltas.
-        res.write(`data: ${JSON.stringify({ method: 'bridge/sync', params: { requests: [...bridge.requests.values()] } })}\n\n`);
+        const status = bridge.ready
+          ? { method: 'bridge/sync', params: { requests: [...bridge.requests.values()] } }
+          : { method: 'bridge/reconnecting', params: { message: 'Codex 服务正在重新连接' } };
+        res.write(`data: ${JSON.stringify(status)}\n\n`);
         const heartbeat = setInterval(() => { if (stream === res) { lastSeen = Date.now(); res.write(': heartbeat\n\n'); } }, 5000);
         req.on('close', () => { clearInterval(heartbeat); if (stream === res) stream = null; }); return;
       }
@@ -191,10 +194,17 @@ export async function start(args = []) {
   });
   const launcher = join(here, '..', 'bin', 'codex.js');
   const bundled = await fs.access(join(here, '..', 'bin', 'codex.bin')).then(() => true, () => false);
-  bridge = new Bridge(bundled ? process.execPath : 'codex', bundled ? [launcher, 'app-server', '--stdio'] : ['app-server', '--stdio'], process.env, publish);
-  try { await bridge.call('initialize', { clientInfo: { name: 'codex_termux_web', version: '0.1.0' }, capabilities: { experimentalApi: true } }); }
-  catch (error) { bridge.close(); throw error; }
-  bridge.write({ method: 'initialized' });
+  bridge = new BridgeController(
+    bundled ? process.execPath : 'codex',
+    bundled ? [launcher, 'app-server', '--stdio'] : ['app-server', '--stdio'],
+    process.env,
+    publish,
+    {
+      initializeParams: { clientInfo: { name: 'codex_termux_web', version: '0.1.0' }, capabilities: { experimentalApi: true } },
+      onReset: () => { ownedThreads.clear(); threadSettings.clear(); },
+    },
+  );
+  await bridge.start();
   await new Promise((yes, no) => { server.once('error', no); server.listen(launch.port, '127.0.0.1', yes); });
   origin = `http://127.0.0.1:${server.address().port}`;
   const link = `${origin}/#${bootToken}`; console.log(`Codex Web: ${link}`);

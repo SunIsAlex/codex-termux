@@ -224,11 +224,12 @@ async function init() {
   source.onmessage = async event => {
     const message = JSON.parse(event.data), p = message.params || {};
     if (message.method === 'bridge/sync') {
-      connected = true; text($('connection'), '已连接'); state();
+      connected = true; text($('connection'), '已连接'); text($('error'), ''); state();
       try { await restore(); $('requests').replaceChildren(); p.requests.forEach(approval); const result = await rpc('model/list'); populateModels(result.data); const account = await rpc('account/read'); if (!account.account && account.requiresOpenaiAuth) fail(new Error('请先在 Termux 执行 codex login')); } catch (e) { fail(e); }
       return;
     }
-    if (message.method === 'bridge/error') { connected = false; fail(new Error(p.message)); state(); return; }
+    if (message.method === 'bridge/error') { connected = false; fail(new Error(`${p.message}；正在自动重连`)); state(); return; }
+    if (message.method === 'bridge/reconnecting') { connected = false; text($('connection'), 'Codex 后端重连中…'); state(); return; }
     if (message.method === 'bridge/unsupported') { fail(new Error(p.message)); return; }
     if (message.id !== undefined) return approval(message);
     if (message.method === 'serverRequest/resolved') document.getElementById('request-' + p.requestId)?.remove();
