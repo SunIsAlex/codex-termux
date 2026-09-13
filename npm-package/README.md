@@ -32,6 +32,30 @@ from one creates a separate branch. Refresh after that client releases the
 thread to resume the original. CLI and Web share authentication, configuration,
 and project files.
 
+## Optional ChatGPT Web provider
+
+The Termux launcher can install the pinned, unofficial
+`miuuyy/codex-chatgpt-web` bridge and expose its Browser-only models in Codex:
+
+```sh
+pkg install x11-repo termux-x11-nightly chromium bun
+codex chatgpt-web install
+# Install/open the Termux:X11 Android app, then start its server:
+termux-x11 :0 &
+export DISPLAY=:0
+codex chatgpt-web setup
+codex chatgpt-web status
+```
+
+Get the companion Android app from the
+[Termux:X11 releases](https://github.com/termux/termux-x11/releases).
+
+Once its reversible Codex route is active, normal `codex` and `codex web`
+launches ensure that the local Responses bridge is running. Android Full-harness
+mode is not enabled because its tunnel-client runtime is not Android-compatible.
+The bridge automates a private Chromium profile and can break when ChatGPT's UI
+changes; use it only with your own account and applicable workspace policy.
+
 ## Notes
 
 - Android 10+ / API 29+ on Termux ARM64 (the release binary is built for API 29)

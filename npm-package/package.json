@@ -11,6 +11,7 @@
   },
   "files": [
     "web-ui/",
+    "chatgpt-web/",
     "bin/codex-web.js",
     "bin/codex.js",
     "bin/codex-exec.js",

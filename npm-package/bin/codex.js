@@ -90,9 +90,20 @@ function detectSubcommands() {
 const args = process.argv.slice(2);
 const first = args[0];
 const webArgs = first === 'web' ? args.slice(1) : first === 'help' && args[1] === 'web' ? ['--help'] : null;
+const chatgptWebArgs = first === 'chatgpt-web' ? args.slice(1) : first === 'help' && args[1] === 'chatgpt-web' ? ['--help'] : null;
 
-if (webArgs) {
+if (chatgptWebArgs) {
   try {
+    const { main } = await import('../chatgpt-web/provider.mjs');
+    await main(chatgptWebArgs);
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+} else if (webArgs) {
+  try {
+    const { ensureProvider } = await import('../chatgpt-web/provider.mjs');
+    await ensureProvider();
     const { start } = await import('../web-ui/server.mjs');
     await start(webArgs);
   } catch (error) {
@@ -110,6 +121,14 @@ if (webArgs) {
       : isOption || isKnownSubcommand || knownSubcommands === null
         ? args
         : ['exec', ...args];
+
+  try {
+    const { ensureProvider } = await import('../chatgpt-web/provider.mjs');
+    await ensureProvider();
+  } catch (error) {
+    console.error(`ChatGPT Web Provider 启动失败：${error.message}`);
+    process.exit(1);
+  }
 
   const child = spawn(binaryPath, finalArgs, {
     stdio: 'inherit',
