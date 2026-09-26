@@ -254,7 +254,23 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2); layout.setMargins(0, dp(6), 0, dp(6));
             messages.addView(view, prepend ? 0 : messages.getChildCount(), layout); rows.put(id, view);
         }
-        view.setText((type.equals("userMessage") ? "YOU" : type.equals("agentMessage") ? "CODEX" : type.toUpperCase()) + "\n\n" + body);
+        if (type.equals("agentMessage") || type.equals("plan")) {
+            // Coalesce streaming deltas without delaying rendering indefinitely.
+            TextView target = view;
+            if (target.getTag() == null) {
+                target.setTag(Boolean.TRUE);
+                Runnable update = () -> {
+                    target.setTag(null);
+                    if (rows.get(id) != target) return;
+                    boolean atBottom = scroll.getScrollY() + scroll.getHeight() >= messages.getHeight() - dp(100);
+                    target.setText(MarkdownText.render(type.equals("plan") ? "PLAN" : "CODEX",
+                        MarkdownDocument.parse(rowText.getOrDefault(id, "")), getResources().getDisplayMetrics().density));
+                    target.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
+                    if (atBottom && !prepend) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+                };
+                if (prepend) update.run(); else target.postDelayed(update, 60);
+            }
+        } else view.setText((type.equals("userMessage") ? "YOU" : type.toUpperCase()) + "\n\n" + body);
         // Bound the live view; complete history remains in Codex and can be reloaded.
         if (rows.size() > 200) {
             String remove = rows.keySet().iterator().next(); messages.removeView(rows.remove(remove)); rowText.remove(remove);

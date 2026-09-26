@@ -2,20 +2,22 @@
 set -eu
 cd "$(dirname "$0")"
 android_jar=${ANDROID_JAR:-../../prototypes/chatgpt-phone-bridge/.cache/android-35.jar}
-for tool in aapt2 javac jar d8 zip keytool apksigner; do
+for tool in aapt2 javac jar d8 zip keytool apksigner curl sha256sum; do
     command -v "$tool" >/dev/null || { echo "Missing tool: $tool" >&2; exit 1; }
 done
 test -f "$android_jar" || { echo 'Set ANDROID_JAR to an Android API 35 android.jar.' >&2; exit 1; }
 mkdir -p build .cache
+sh fetch-markdown.sh
 stage=$(mktemp -d "$PWD/build/compile.XXXXXX")
 mkdir -p "$stage/classes" "$stage/dex"
 aapt2 link -I "$android_jar" --manifest app/src/main/AndroidManifest.xml \
-    --min-sdk-version 29 --target-sdk-version 35 --version-code 1 --version-name 0.1.0 \
+    --min-sdk-version 29 --target-sdk-version 35 --version-code 2 --version-name 0.2.0 \
     -o "$stage/unsigned.apk"
-javac --release 8 -cp "$android_jar" -d "$stage/classes" app/src/main/java/dev/codex/nativeapp/*.java
+javac --release 8 -cp "$android_jar:.cache/markdown/*" -d "$stage/classes" app/src/main/java/dev/codex/nativeapp/*.java
 jar cf "$stage/classes.jar" -C "$stage/classes" .
-d8 --lib "$android_jar" --min-api 29 --output "$stage/dex" "$stage/classes.jar"
+d8 --lib "$android_jar" --min-api 29 --output "$stage/dex" "$stage/classes.jar" .cache/markdown/*.jar
 (cd "$stage/dex" && zip -q -j ../unsigned.apk classes.dex)
+zip -q -j "$stage/unsigned.apk" COMMONMARK-LICENSE.txt
 if [ ! -f .cache/debug.keystore ]; then
     keytool -genkeypair -keystore .cache/debug.keystore -storepass android -keypass android \
         -alias debug -dname CN=CodexNative -keyalg RSA -keysize 2048 -validity 10000

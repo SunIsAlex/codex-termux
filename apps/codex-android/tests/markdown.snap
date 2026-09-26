@@ -1,0 +1,47 @@
+Build notes
+
+Use bold, italic, both, removed and x < 2.
+
+A quoted paragraph.
+
+Another line.
+
+1. First item
+2. Second item
+    • Nested item
+
+• ☑ Tested
+• ☐ Ship
+
+  const x = "**not bold**";
+  console.log(x);
+
+Project and https://example.org.
+
+Feature  │  Status
+Markdown  │  Ready
+Streaming  │  ok
+
+────────────
+
+[Image: Diagram]
+
+
+--- styles ---
+HEADING 1 | Build notes
+STRONG  | bold
+EMPHASIS  | italic
+STRONG  | both
+EMPHASIS  | both
+STRIKE  | removed
+CODE  | x < 2
+STRONG  | quoted
+QUOTE  | A quoted paragraph.\n\nAnother line.\n\n
+CODE_BLOCK  |   const x = "**not bold**";\n  console.log(x);\n
+LINK https://example.com/project | Project
+LINK https://example.org | https://example.org
+STRONG  | Feature
+STRONG  | Status
+STRONG  | Markdown
+CODE  | ok
+TABLE  | Feature  │  Status\nMarkdown  │  Ready\nStreaming  │  ok\n

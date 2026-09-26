@@ -39,8 +39,13 @@ Grant the permission and tap the button again if Android prompts on first use.
   service manually if needed. A Codex child-process crash triggers reconnect.
 - Sessions owned by another client display the backend error. Use a new chat
   or release that client's writer lease before resuming.
-- Version 0.1 displays plain text and tool details. Image upload, rich Markdown,
-  account login, Plan/effort controls and MCP form/URL acceptance are not yet
+- Version 0.2 renders Markdown replies and plans using native text spans:
+  headings, bold/italic/strikethrough, nested lists, task lists, blockquotes,
+  inline/fenced/indented code, links, and basic text tables. Streaming updates
+  are coalesced. User messages and tool details stay literal. Code whitespace
+  is preserved; wide code and table rows wrap to the screen. Images show their
+  alt text, and HTML stays literal. HTTP(S) and mailto links open externally.
+  Image upload, account login, Plan/effort controls and MCP form/URL acceptance are not yet
   implemented; MCP requests can be explicitly declined. Login with `codex login`
   in Termux. Model names come from the running backend.
 - The viewport retains up to 200 items with 24,000 characters per item. Full
@@ -56,3 +61,6 @@ the APK; a successful build alone does not establish on-device behavior.
 Run `sh apps/codex-android/test-java.sh` for the actual Android transport on the
 host JVM, with Unicode framing and an interrupted request across reconnection.
 Set `JSON_JAR` to an org.json JVM jar if the existing prototype cache is absent.
+The same script checks Markdown text/style snapshots and partial streaming
+input. Builds fetch checksum-pinned CommonMark 0.21.0 artifacts (Java 8) from
+Maven Central and cache them locally. Its BSD license is included in the APK.
