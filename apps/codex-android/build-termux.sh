@@ -11,7 +11,7 @@ sh fetch-markdown.sh
 stage=$(mktemp -d "$PWD/build/compile.XXXXXX")
 mkdir -p "$stage/classes" "$stage/dex"
 aapt2 link -I "$android_jar" --manifest app/src/main/AndroidManifest.xml \
-    --min-sdk-version 29 --target-sdk-version 35 --version-code 2 --version-name 0.2.0 \
+    --min-sdk-version 29 --target-sdk-version 35 --version-code 3 --version-name 0.3.0 \
     -o "$stage/unsigned.apk"
 javac --release 8 -cp "$android_jar:.cache/markdown/*" -d "$stage/classes" app/src/main/java/dev/codex/nativeapp/*.java
 jar cf "$stage/classes.jar" -C "$stage/classes" .

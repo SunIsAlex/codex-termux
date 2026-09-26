@@ -32,7 +32,7 @@ public final class MainActivity extends Activity {
     private LinearLayout messages;
     private ScrollView scroll;
     private final ArrayList<String> modelIds = new ArrayList<>();
-    private final LinkedHashMap<String, TextView> rows = new LinkedHashMap<>();
+    private final LinkedHashMap<String, View> rows = new LinkedHashMap<>();
     private final LinkedHashMap<String, String> rowText = new LinkedHashMap<>();
     private final LinkedHashMap<String, JSONObject> requests = new LinkedHashMap<>();
     private AlertDialog approval;
@@ -124,6 +124,10 @@ public final class MainActivity extends Activity {
             if (approval != null) approval.dismiss(); approval = null; showRequest();
         } else if (thread.equals(p.optString("threadId"))) {
             if (method.equals("item/started") || method.equals("item/completed")) render(p.optJSONObject("item"), false);
+            else if (method.equals("item/commandExecution/outputDelta") || method.equals("item/fileChange/outputDelta") || method.equals("item/mcpToolCall/progress")) {
+                View row = rows.get(p.optString("itemId"));
+                if (row instanceof ToolCard) ((ToolCard) row).update(method, p.optString(method.endsWith("/progress") ? "message" : "delta"));
+            }
             else if (method.equals("item/agentMessage/delta")) {
                 String id = p.optString("itemId");
                 render(object("id", id, "type", "agentMessage", "text", rowText.getOrDefault(id, "") + p.optString("delta")), false);
@@ -240,15 +244,34 @@ public final class MainActivity extends Activity {
     private void render(JSONObject item, boolean prepend) {
         if (item == null || "reasoning".equals(item.optString("type"))) return;
         String id = item.optString("id"), type = item.optString("type"), body;
+        if (ToolPresentation.isTool(type)) {
+            boolean follow = scroll.getScrollY() + scroll.getHeight() >= messages.getHeight() - dp(100);
+            View existing = rows.get(id);
+            ToolCard card;
+            if (existing instanceof ToolCard) card = (ToolCard) existing;
+            else {
+                if (existing != null) messages.removeView(existing);
+                card = new ToolCard(this);
+                LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
+                layout.setMargins(0, dp(5), 0, dp(5));
+                messages.addView(card, prepend ? 0 : messages.getChildCount(), layout); rows.put(id, card);
+            }
+            card.bind(item); trimRows();
+            if (!prepend && follow) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+            return;
+        }
         if (type.equals("userMessage")) {
             StringBuilder text = new StringBuilder(); JSONArray content = item.optJSONArray("content");
             if (content != null) for (int i = 0; i < content.length(); i++) text.append(content.optJSONObject(i).optString("text", "[attachment]")).append('\n');
             body = text.toString();
         } else body = item.optString("text", item.toString());
         if (body.length() > 24000) body = body.substring(body.length() - 24000);
-        rowText.put(id, body); TextView view = rows.get(id);
+        rowText.put(id, body);
+        View existing = rows.get(id);
+        TextView view = existing instanceof TextView ? (TextView) existing : null;
         boolean follow = scroll.getScrollY() + scroll.getHeight() >= messages.getHeight() - dp(100);
         if (view == null) {
+            if (existing != null) messages.removeView(existing);
             view = label("", 16); view.setTextIsSelectable(true); view.setPadding(dp(14), dp(12), dp(14), dp(12));
             GradientDrawable background = new GradientDrawable(); background.setColor(type.equals("userMessage") ? 0xffe2ebe3 : 0xffffffff); background.setCornerRadius(dp(14)); view.setBackground(background);
             LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2); layout.setMargins(0, dp(6), 0, dp(6));
@@ -271,11 +294,14 @@ public final class MainActivity extends Activity {
                 if (prepend) update.run(); else target.postDelayed(update, 60);
             }
         } else view.setText((type.equals("userMessage") ? "YOU" : type.toUpperCase()) + "\n\n" + body);
+        trimRows();
+        if (!prepend && follow) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    }
+    private void trimRows() {
         // Bound the live view; complete history remains in Codex and can be reloaded.
         if (rows.size() > 200) {
             String remove = rows.keySet().iterator().next(); messages.removeView(rows.remove(remove)); rowText.remove(remove);
         }
-        if (!prepend && follow) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
     }
     private void queueRequest(JSONObject request) {
         if (request == null) return; requests.put(String.valueOf(request.opt("id")), request); showRequest();

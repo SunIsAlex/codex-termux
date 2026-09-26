@@ -1,0 +1,61 @@
+>_ Terminal [Running / RUNNING]
+npm run build
+/workspace/app
+Command
+npm run build
+---
+>_ Terminal [Done / SUCCESS]
+npm run build
+/workspace/app · exit 0 · 1.3 s
+Command
+npm run build
+
+Output
+Build complete
+
+---
+>_ Terminal [Failed / ERROR]
+npm test
+exit 1 · 80 ms
+Command
+npm test
+
+Output
+One test failed
+
+---
+± File changes [Done / SUCCESS]
+src/app.js
+
+Update · src/app.js
+@@ -1 +1 @@
+-old()
++new()
+---
+⚙ search [Running / RUNNING]
+docs
+
+Arguments
+{"query": "Android"}
+---
+⚙ lookup [Failed / ERROR]
+Tap to inspect details
+
+Content
+[{"text": "Not found"}]
+---
+⌕ Web search [Done / SUCCESS]
+Android text spans
+
+Search
+Android text spans
+---
+◇ Future Tool Type [Details / NEUTRAL]
+Tap to inspect details
+
+Details
+{
+  "type": "futureToolType",
+  "message": "Keep unfamiliar tools inspectable"
+}
+---

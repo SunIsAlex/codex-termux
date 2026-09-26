@@ -23,6 +23,11 @@ Grant the permission and tap the button again if Android prompts on first use.
 
 ## Behavior and limits
 
+- Version 0.3 adds compact native tool cards with status badges, summaries,
+  command directories, exit codes and durations. Expand a card for selectable
+  output, arguments, results or color-highlighted file diffs; copy details with
+  one tap. Live terminal output and MCP progress update the existing card while
+  retaining its expanded state. Tool previews are capped at 24,000 characters.
 - Native message list, streamed replies, model picker, paginated sessions and
   history, saved drafts, task interruption, permission decisions and user-input
   questions. Existing Codex model/provider and permission configuration applies.
@@ -42,7 +47,7 @@ Grant the permission and tap the button again if Android prompts on first use.
 - Version 0.2 renders Markdown replies and plans using native text spans:
   headings, bold/italic/strikethrough, nested lists, task lists, blockquotes,
   inline/fenced/indented code, links, and basic text tables. Streaming updates
-  are coalesced. User messages and tool details stay literal. Code whitespace
+  are coalesced. User messages stay literal. Code whitespace
   is preserved; wide code and table rows wrap to the screen. Images show their
   alt text, and HTML stays literal. HTTP(S) and mailto links open externally.
   Image upload, account login, Plan/effort controls and MCP form/URL acceptance are not yet
@@ -61,6 +66,7 @@ the APK; a successful build alone does not establish on-device behavior.
 Run `sh apps/codex-android/test-java.sh` for the actual Android transport on the
 host JVM, with Unicode framing and an interrupted request across reconnection.
 Set `JSON_JAR` to an org.json JVM jar if the existing prototype cache is absent.
-The same script checks Markdown text/style snapshots and partial streaming
+The same script checks tool-card presentation snapshots, output bounds,
+Markdown text/style snapshots and partial streaming
 input. Builds fetch checksum-pinned CommonMark 0.21.0 artifacts (Java 8) from
 Maven Central and cache them locally. Its BSD license is included in the APK.
