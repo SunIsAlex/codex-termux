@@ -1,3 +1,72 @@
+# [0.156.1-termux.1] - 2026-09-24
+
+## Codex Termux 0.156.1-termux.1 — upstream rust-v0.156.1
+
+- Merges upstream tag `rust-v0.156.1` into the Termux fork.
+- GPT-6 Sol/Luna join the catalog; `gpt-6-astra` was already visible.
+- Upstream daemon updater flow adopted with the fork fail-closed guard moved to
+  the new path: no upstream install script fetch, daemon update requests route
+  to the fork npm channel, regression test pins the refusal.
+- The 8 KiB model-message caps follow the `ResolvedModelMessages` refactor
+  (guardian node REPL policy, persistent mode, remote catalog loader).
+- AGENTS.md disk-discovery fix (upstream #37704) re-applied on the new refresh
+  flow; `/init` after startup is picked up again.
+- Status-indicator background-terminal 200 ms frame branch re-applied on the
+  upstream progress/shimmer condition.
+- Fork sandbox fix #22 (no-backend platforms take the unsandboxed path)
+  preserved on the new orchestrator decision path.
+- A read that needs no sandbox no longer fails on a platform that cannot
+  provide one. The read routing asked whether the context needs a sandbox for
+  **reading**, while the backend refuses a context that needs one for reads
+  **or writes**: a read-only policy — full disk reads, no writes — fell between
+  the two questions and failed with "sandboxed filesystem operations require
+  configured runtime paths" on a read nothing had denied. Both now ask the same
+  question, so apply_patch pre-verification reads the host file again instead of
+  refusing to verify the patch.
+
+# [0.155.1] - 2026-09-19
+
+## Codex Termux 0.155.1 — upstream rust-v0.155.1
+
+- Merges upstream tag `rust-v0.155.1` into the Termux fork.
+- A model with an oversized message no longer hides the whole model list: the
+  size check still runs, but it drops the single model that fails and says which
+  one, instead of making the entire catalog unreadable and letting the client
+  fall back to the list compiled into the binary — where the new models are
+  missing. The same rule applies to the on-disk model cache, which is the
+  fallback when the network does not answer.
+- `rustls` moves to 0.23.45 (RUSTSEC-2026-0285).
+
+# [0.155.0] - 2026-09-18
+
+## Codex Termux 0.155.0 — upstream rust-v0.155.0 and coordinated rollout writers
+
+- Merges upstream tag `rust-v0.155.0` into the Termux fork.
+- Carries the unsupported-file-lock degradation onto the relocated writer lock:
+  the classifier, its call sites and its regression test now live in the
+  rollout writer-lock module, and the release guard points at the new path.
+- Deny-read policies stay fail-closed: the degradation applies only where the
+  filesystem cannot lock at all, never where reads are denied.
+- The daemon keeps its fork-owned no-updater policy: `daemon update` fails
+  closed with the npm channel message and no updater process is started.
+- The Android release profile builds with codegen-units=4 (upstream default),
+  down from 16 in 0.153.3.
+- The package and npm channel are unchanged from 0.154.0.
+- Upstream highlights: voice conversations behind experimental features with a
+  separate audio host (not built in this package, so `/voice` is unavailable on
+  Termux), Guardian settings and execution moved into dedicated crates, managed
+  daemon thread restore on restart, coordinated rollout compression with active
+  thread writers, WSL interop escape hardening, network approvals bound to their
+  originating execution, and streaming reasoning summaries with completion
+  timestamps in the TUI.
+
+# [0.154.0] - Unreleased
+
+## Codex Termux 0.154.0 — upstream rust-v0.154.0 integration
+
+- Merges upstream tag `rust-v0.154.0` into the Termux fork.
+- Highlights to be completed at release time.
+
 # [0.153.3] - 2026-09-05
 
 ## Codex Termux 0.153.3 — guardrails for model-owned prompts

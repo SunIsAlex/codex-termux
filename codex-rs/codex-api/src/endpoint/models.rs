@@ -2,15 +2,18 @@ use crate::auth::SharedAuthProvider;
 use crate::endpoint::session::EndpointSession;
 use crate::error::ApiError;
 use crate::provider::Provider;
+use bytes::Bytes;
 use codex_client::HttpTransport;
 use codex_client::RequestTelemetry;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelsResponse;
-use codex_protocol::openai_models::validate_model_infos;
+use codex_protocol::openai_models::partition_model_infos;
 use http::HeaderMap;
 use http::Method;
 use http::header::ETAG;
 use std::sync::Arc;
+use tracing::warn;
+use url::Url;
 
 pub struct ModelsClient<T: HttpTransport> {
     session: EndpointSession<T>,
@@ -44,11 +47,74 @@ impl<T: HttpTransport> ModelsClient<T> {
         request.url
     }
 
+    /// Builds a full catalog URL, preserving provider routing parameters and client version.
+    pub fn catalog_request_url(
+        provider: &Provider,
+        catalog_url: &str,
+        client_version: &str,
+    ) -> Result<String, ApiError> {
+        let invalid = |message: &str| ApiError::InvalidRequest {
+            message: message.to_string(),
+        };
+        let mut url = Url::parse(catalog_url)
+            .map_err(|_| invalid("model_catalog_url must be an absolute URL"))?;
+        {
+            let mut query = url.query_pairs_mut();
+            if let Some(params) = &provider.query_params {
+                query.extend_pairs(params);
+            }
+            query.append_pair("client_version", client_version);
+        }
+        Ok(url.into())
+    }
+
+    /// Fetches and decodes a catalog, optionally bounding response bytes before decoding.
     pub async fn list_models(
         &self,
         request_url: String,
         extra_headers: HeaderMap,
+        response_body_limit_bytes: Option<usize>,
     ) -> Result<(Vec<ModelInfo>, Option<String>), ApiError> {
+        let (body, header_etag) = self
+            .list_models_raw(request_url, extra_headers, response_body_limit_bytes)
+            .await?;
+        let ModelsResponse { models } =
+            serde_json::from_slice::<ModelsResponse>(&body).map_err(|e| {
+                ApiError::Stream(format!(
+                    "failed to decode models response: {:?} at line {} column {} (body: {} bytes)",
+                    e.classify(),
+                    e.line(),
+                    e.column(),
+                    body.len()
+                ))
+            })?;
+        // Un modello con un messaggio fuori misura viene SCARTATO LUI, con un
+        // avviso che ne dice slug, campo e byte: gli altri restano serviti. Se
+        // non ne resta nessuno valido l'errore resta, com'era.
+        let (models, invalid) = partition_model_infos(models);
+        for error in &invalid {
+            warn!("discarding model with an oversized message: {error}");
+        }
+        if models.is_empty() && !invalid.is_empty() {
+            return Err(ApiError::Stream(format!(
+                "invalid model message in models response: {}",
+                invalid[0]
+            )));
+        }
+
+        Ok((models, header_etag))
+    }
+
+    /// Fetches a catalog using the provider's auth and retry policy without decoding it.
+    ///
+    /// Callers accepting provider-controlled catalogs must set a response-body limit
+    /// and validate the native response without including raw values in diagnostics.
+    pub async fn list_models_raw(
+        &self,
+        request_url: String,
+        extra_headers: HeaderMap,
+        response_body_limit_bytes: Option<usize>,
+    ) -> Result<(Bytes, Option<String>), ApiError> {
         let resp = self
             .session
             .execute_with(
@@ -58,6 +124,7 @@ impl<T: HttpTransport> ModelsClient<T> {
                 /*body*/ None,
                 move |req| {
                     req.url.clone_from(&request_url);
+                    req.response_body_limit_bytes = response_body_limit_bytes;
                 },
             )
             .await?;
@@ -68,20 +135,16 @@ impl<T: HttpTransport> ModelsClient<T> {
             .and_then(|value| value.to_str().ok())
             .map(ToString::to_string);
 
-        let ModelsResponse { models } = serde_json::from_slice::<ModelsResponse>(&resp.body)
-            .map_err(|e| ApiError::Stream(format!("failed to decode models response: {e}")))?;
-        validate_model_infos(&models).map_err(|error| {
-            ApiError::Stream(format!("invalid model message in models response: {error}"))
-        })?;
-
-        Ok((models, header_etag))
+        Ok((resp.body, header_etag))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::AuthError;
     use crate::auth::AuthProvider;
+    use crate::auth::AuthProviderFuture;
     use crate::provider::RetryConfig;
     use codex_client::Request;
     use codex_client::Response;
@@ -139,6 +202,29 @@ mod tests {
         fn add_auth_headers(&self, _headers: &mut HeaderMap) {}
     }
 
+    #[derive(Default)]
+    struct RetryAuth {
+        request_limits: Mutex<Vec<Option<usize>>>,
+    }
+
+    impl AuthProvider for RetryAuth {
+        fn add_auth_headers(&self, headers: &mut HeaderMap) {
+            headers.insert(http::header::AUTHORIZATION, "Bearer test".parse().unwrap());
+        }
+
+        fn apply_auth(&self, mut request: Request) -> AuthProviderFuture<'_> {
+            Box::pin(async move {
+                let mut limits = self.request_limits.lock().unwrap();
+                limits.push(request.response_body_limit_bytes);
+                if limits.len() == 1 {
+                    return Err(AuthError::Transient("retry authentication".to_string()));
+                }
+                self.add_auth_headers(&mut request.headers);
+                Ok(request)
+            })
+        }
+    }
+
     fn provider(base_url: &str) -> Provider {
         Provider {
             name: "test".to_string(),
@@ -154,6 +240,13 @@ mod tests {
             },
             stream_idle_timeout: Duration::from_secs(1),
         }
+    }
+
+    fn model_with_slug_and_instructions(slug: &str, len: usize) -> ModelInfo {
+        let mut value = model_with_persistent_instructions(len);
+        value.slug = slug.to_string();
+        value.display_name = slug.to_string();
+        value
     }
 
     fn model_with_persistent_instructions(len: usize) -> ModelInfo {
@@ -183,6 +276,89 @@ mod tests {
         .expect("test model should deserialize")
     }
 
+    #[test]
+    fn catalog_request_url_preserves_routing_and_encodes_queries() {
+        let mut provider = provider("https://gateway.example/v1");
+        provider.query_params = Some(std::collections::HashMap::from([(
+            "api-version".to_string(),
+            "2026 09".to_string(),
+        )]));
+        let url = ModelsClient::<CapturingTransport>::catalog_request_url(
+            &provider,
+            "https://catalog.example/codex/models?deployment=one",
+            "1.2.3",
+        )
+        .unwrap();
+        assert_eq!(
+            url,
+            "https://catalog.example/codex/models?deployment=one&api-version=2026+09&client_version=1.2.3"
+        );
+    }
+
+    #[test]
+    fn catalog_request_url_rejects_relative_urls() {
+        let provider = provider("https://gateway.example/v1");
+        for catalog_url in ["/codex/models", "codex/models"] {
+            let error = ModelsClient::<CapturingTransport>::catalog_request_url(
+                &provider,
+                catalog_url,
+                "1.2.3",
+            )
+            .unwrap_err();
+            assert!(matches!(error, ApiError::InvalidRequest { .. }));
+        }
+    }
+
+    #[tokio::test]
+    async fn response_body_limit_survives_auth_retry_without_limiting_other_models_requests() {
+        let transport = CapturingTransport::default();
+        let auth = Arc::new(RetryAuth::default());
+        let mut provider = provider("https://example.com/api/codex");
+        provider.retry.max_attempts = 2;
+        let request_url = ModelsClient::<CapturingTransport>::request_url(&provider, "0.99.0");
+        let client = ModelsClient::new(transport.clone(), provider, auth.clone());
+
+        client
+            .list_models(
+                request_url.clone(),
+                HeaderMap::new(),
+                /*response_body_limit_bytes*/ Some(64),
+            )
+            .await
+            .expect("limited request should succeed after auth retry");
+        {
+            let request = transport.last_request.lock().unwrap();
+            let request = request.as_ref().unwrap();
+            assert_eq!(request.response_body_limit_bytes, Some(64));
+            assert_eq!(request.url, request_url);
+            assert_eq!(request.headers[http::header::AUTHORIZATION], "Bearer test");
+        }
+
+        let (models, _) = client
+            .list_models(
+                request_url,
+                HeaderMap::new(),
+                /*response_body_limit_bytes*/ None,
+            )
+            .await
+            .expect("ordinary request on the same client should remain unbounded");
+        assert!(models.is_empty());
+        assert_eq!(
+            transport
+                .last_request
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .response_body_limit_bytes,
+            None
+        );
+        assert_eq!(
+            *auth.request_limits.lock().unwrap(),
+            vec![Some(64), Some(64), None]
+        );
+    }
+
     #[tokio::test]
     async fn appends_client_version_query() {
         let response = ModelsResponse { models: Vec::new() };
@@ -198,7 +374,11 @@ mod tests {
         let client = ModelsClient::new(transport.clone(), provider, Arc::new(DummyAuth));
 
         let (models, _) = client
-            .list_models(request_url, HeaderMap::new())
+            .list_models(
+                request_url,
+                HeaderMap::new(),
+                /*response_body_limit_bytes*/ None,
+            )
             .await
             .expect("request should succeed");
 
@@ -257,7 +437,11 @@ mod tests {
         let client = ModelsClient::new(transport, provider, Arc::new(DummyAuth));
 
         let (models, _) = client
-            .list_models(request_url, HeaderMap::new())
+            .list_models(
+                request_url,
+                HeaderMap::new(),
+                /*response_body_limit_bytes*/ None,
+            )
             .await
             .expect("request should succeed");
 
@@ -282,7 +466,11 @@ mod tests {
         let client = ModelsClient::new(transport, provider, Arc::new(DummyAuth));
 
         let (models, etag) = client
-            .list_models(request_url, HeaderMap::new())
+            .list_models(
+                request_url,
+                HeaderMap::new(),
+                /*response_body_limit_bytes*/ None,
+            )
             .await
             .expect("request should succeed");
 
@@ -291,30 +479,95 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_models_loader_accepts_exact_limit_and_rejects_oversized_messages() {
-        for (len, expected_ok) in [(8 * 1024, true), (8 * 1024 + 1, false)] {
-            let response = ModelsResponse {
-                models: vec![model_with_persistent_instructions(len)],
-            };
-            let transport = CapturingTransport {
-                last_request: Arc::new(Mutex::new(None)),
-                body: Arc::new(response),
-                etag: None,
-            };
-            let provider = provider("https://example.com/api/codex");
-            let request_url = ModelsClient::<CapturingTransport>::request_url(&provider, "0.99.0");
-            let client = ModelsClient::new(transport, provider, Arc::new(DummyAuth));
+    async fn remote_models_loader_drops_only_the_oversized_model() {
+        // Un modello fuori misura non deve azzerare il catalogo: si scarta lui,
+        // gli altri restano serviti. Prima un solo campo troppo lungo rendeva
+        // illeggibile TUTTA la risposta e il chiamante ripiegava sull'elenco
+        // compilato nel binario — dove i modelli nuovi non ci sono.
+        let response = ModelsResponse {
+            models: vec![
+                model_with_slug_and_instructions("gpt-ok-1", 0),
+                model_with_slug_and_instructions("gpt-too-long", 8 * 1024 + 1),
+                model_with_slug_and_instructions("gpt-ok-2", 8 * 1024),
+            ],
+        };
+        let transport = CapturingTransport {
+            last_request: Arc::new(Mutex::new(None)),
+            body: Arc::new(response),
+            etag: None,
+        };
+        let provider = provider("https://example.com/api/codex");
+        let request_url = ModelsClient::<CapturingTransport>::request_url(&provider, "0.99.0");
+        let client = ModelsClient::new(transport, provider, Arc::new(DummyAuth));
 
-            let result = client.list_models(request_url, HeaderMap::new()).await;
-            if expected_ok {
-                assert!(result.is_ok(), "exact-limit remote model should load");
-            } else {
-                let error = result.expect_err("oversized remote model must be rejected");
-                let message = error.to_string();
-                assert!(message.contains("persistent_instructions"));
-                assert!(message.contains("8193"));
-                assert!(message.contains("8192"));
-            }
-        }
+        let (models, _etag) = client
+            .list_models(
+                request_url,
+                HeaderMap::new(),
+                /*response_body_limit_bytes*/ None,
+            )
+            .await
+            .expect("one oversized model must not fail the whole response");
+        assert_eq!(models.len(), 2, "the two valid models are served");
+        assert!(models.iter().all(|model| model.slug != "gpt-too-long"));
+    }
+
+    #[tokio::test]
+    async fn remote_models_loader_accepts_the_exact_limit() {
+        let response = ModelsResponse {
+            models: vec![model_with_slug_and_instructions("gpt-exact", 8 * 1024)],
+        };
+        let transport = CapturingTransport {
+            last_request: Arc::new(Mutex::new(None)),
+            body: Arc::new(response),
+            etag: None,
+        };
+        let provider = provider("https://example.com/api/codex");
+        let request_url = ModelsClient::<CapturingTransport>::request_url(&provider, "0.99.0");
+        let client = ModelsClient::new(transport, provider, Arc::new(DummyAuth));
+
+        let (models, _etag) = client
+            .list_models(
+                request_url,
+                HeaderMap::new(),
+                /*response_body_limit_bytes*/ None,
+            )
+            .await
+            .expect("exact-limit remote model should load");
+        assert_eq!(models.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn remote_models_loader_still_fails_when_every_model_is_oversized() {
+        // Se non ne resta nemmeno uno valido l'errore resta, com'era: non c'e'
+        // un catalogo da servire, e fingere il contrario sarebbe peggio.
+        let response = ModelsResponse {
+            models: vec![
+                model_with_slug_and_instructions("bad-1", 8 * 1024 + 1),
+                model_with_slug_and_instructions("bad-2", 8 * 1024 + 1),
+            ],
+        };
+        let transport = CapturingTransport {
+            last_request: Arc::new(Mutex::new(None)),
+            body: Arc::new(response),
+            etag: None,
+        };
+        let provider = provider("https://example.com/api/codex");
+        let request_url = ModelsClient::<CapturingTransport>::request_url(&provider, "0.99.0");
+        let client = ModelsClient::new(transport, provider, Arc::new(DummyAuth));
+
+        let error = client
+            .list_models(
+                request_url,
+                HeaderMap::new(),
+                /*response_body_limit_bytes*/ None,
+            )
+            .await
+            .expect_err("a catalog with no valid model is still an error");
+        let message = error.to_string();
+        assert!(message.contains("invalid model message in models response"));
+        assert!(message.contains("persistent_instructions"));
+        assert!(message.contains("8193"));
+        assert!(message.contains("8192"));
     }
 }

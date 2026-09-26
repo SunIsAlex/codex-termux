@@ -66,7 +66,7 @@ printf "Patch #2 (Release Profile): "
 if grep -q 'lto = "thin"' codex-rs/Cargo.toml \
   && grep -q 'zip = "2.4.2"' codex-rs/Cargo.toml \
   && grep -q 'CARGO_PROFILE_RELEASE_LTO: "thin"' .github/workflows/termux-npm-build-publish.yml \
-  && grep -q 'CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"' .github/workflows/termux-npm-build-publish.yml \
+  && grep -q 'CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "4"' .github/workflows/termux-npm-build-publish.yml \
   && grep -q 'CARGO_PROFILE_RELEASE_PANIC: "abort"' .github/workflows/termux-npm-build-publish.yml \
   && grep -q 'CARGO_PROFILE_RELEASE_STRIP: "symbols"' .github/workflows/termux-npm-build-publish.yml; then
   pass
@@ -165,11 +165,21 @@ else
 fi
 
 printf "Patch #13 (Fork-safe Managed Updates): "
+# Termux re-anchor: upstream moved the updater into a full loop with an
+# INSTALL_URL constant. The fork guard is now fail-closed at runtime (the
+# standalone installer refuses with a fork-named error and the daemon update
+# reports the fork npm channel), so the check pins the guard and its test
+# instead of the absence of the upstream constant. The TUI action file and the
+# installer-calling sources must still be free of the upstream install URL.
 if grep -q "@mmmbuto/codex-cli-termux@latest" codex-rs/tui/src/update_action.rs \
   && grep -q "@mmmbuto/codex-cli-termux@latest" codex-rs/app-server-daemon/src/lib.rs \
   && grep -q "@mmmbuto/codex-cli-termux@latest" codex-rs/app-server-daemon/README.md \
   && grep -q "auto_update_enabled: false" codex-rs/app-server-daemon/src/lib.rs \
-  && ! grep -R -q "chatgpt.com/codex/install" codex-rs/tui/src/update_action.rs codex-rs/app-server-daemon; then
+  && grep -q "codex-termux fork: standalone auto-updater is disabled" codex-rs/app-server-daemon/src/update_loop.rs \
+  && grep -q "install_latest_standalone_is_disabled_in_fork" codex-rs/app-server-daemon/src/update_loop_tests.rs \
+  && grep -q "UpdateAction::Daemon(_) => (" codex-rs/tui/src/update_action.rs \
+  && ! grep -q "chatgpt.com/codex/install" codex-rs/tui/src/update_action.rs \
+  && ! grep -R -q "chatgpt.com/codex/install" codex-rs/app-server-daemon/src/managed_install.rs codex-rs/app-server-daemon/src/manual_update.rs codex-rs/app-server-daemon/src/migration.rs; then
   pass
 else
   fail
@@ -462,17 +472,13 @@ else
 fi
 
 printf "Patch #26 (Model Catalog Instruction Fallback): "
-# The first re-anchor changed the old `#[serde(default)]` check to
-# `#[serde(skip)]`: upstream's legacy `base_instructions` layer made the
-# duplicate serialized key invalid. That representation is now gone in 0.149;
-# upstream removed `ModelInfo.base_instructions` entirely, so a second guard
-# tied to that field, `self.base_instructions`, an old protocol test, or an
-# empty-instructions log would be red on the correct tree. The property that
-# survives both upstream changes is behavioural: for a model with no usable
-# instructions, `get_model_instructions()` must not return an empty string.
-# Run the manager test that exercises exactly that value-level contract. It
-# currently proves the fallback at models-manager/model_info.rs:98-127 and its
-# twelve-test module; it does not name the implementation hook in this guard.
+# 0.156 moved instruction rendering to `prompts::render_model_instructions`
+# (an `unwrap_or_default`), so a custom catalog entry without a usable
+# instructions template would render empty. The fork keeps its
+# `ensure_catalog_instructions` fallback inside `with_config_overrides`, and
+# this guard runs the manager test that pins the contract: a catalog model
+# without a usable template gets `BASE_INSTRUCTIONS` and the rendering is
+# never empty. It does not name the implementation hook in this guard.
 if [ "${VERIFY_PATCHES_SKIP_CARGO:-0}" = "1" ]; then
   if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
     echo "skip not allowed in CI"
@@ -517,7 +523,9 @@ printf "Patch #29 (advisory locks degrade where the filesystem lacks them): "
 # one lock site the rule had never been extended to, which took the whole CLI
 # down at startup on the device. Version-agnostic on purpose: this checks the
 # behaviour is wired, not which upstream release introduced the call.
-writer_lock=codex-rs/thread-store/src/local/writer_lock.rs
+# 0.155.0: upstream renamed thread-store/src/local/writer_lock.rs to
+# rollout/src/writer_lock.rs (commit 73a1148c9c); the guard follows the file.
+writer_lock=codex-rs/rollout/src/writer_lock.rs
 if [ -f "$writer_lock" ] \
   && grep -q 'fn is_unsupported_file_lock_error' "$writer_lock" \
   && grep -q 'ErrorKind::Unsupported' "$writer_lock" \
@@ -570,16 +578,40 @@ fi
 if ! npm_package_version="$(node -p "require('./npm-package/package.json').version")"; then
   npm_package_version=
 fi
+fork_version_matches=0
+if [ -n "$cargo_workspace_version" ]; then
+  if [ "$npm_package_version" = "$cargo_workspace_version" ]; then
+    fork_version_matches=1
+  else
+    case "$npm_package_version" in
+      "${cargo_workspace_version}-termux."*)
+        fork_patch="${npm_package_version#"${cargo_workspace_version}-termux."}"
+        case "$fork_patch" in
+          '' | 0 | 0* | *[!0-9]*) ;;   # empty, zero, a leading zero, or not a number
+          *) fork_version_matches=1 ;;
+        esac
+        ;;
+    esac
+  fi
+fi
 # The release contract has two deliberately separate relationships. BASE is
 # the upstream identity: the package description's base, the release note's
 # base, and the existing upstream tag must agree (rust-v0.149.1 here). FORK is
 # the public package identity: npm version, Cargo workspace version (what
 # CARGO_PKG_VERSION reports in TUI/doctor), the versioned release note, and
-# the changelog entry must ALL agree on the fork's non-colliding version. As
-# of 0.149.3 the Cargo workspace version deliberately equals the npm version:
-# when they diverged (npm 0.149.2 vs Cargo 0.149.1) every fresh install
-# immediately showed a false "update available" banner. Fork and upstream
-# version numbers remain separate lines and must not be equated.
+# the changelog entry must ALL agree on the fork's non-colliding version.
+#
+# Under the versioning standard (2026-09-24) the npm version carries this
+# fork's suffix while the Cargo workspace version stays at the upstream
+# version, because the binary must keep printing `codex-cli <upstream>` for
+# the hook guard of the fleet. The FORK identity is therefore accepted in
+# exactly two shapes:
+#   npm == cargo                            the bare line
+#   npm == "<cargo>-termux.<n>", n >= 1     the standard's shape, no leading zeros
+# The upstream part must match EXACTLY: a different number is a different
+# release, not a suffix. When the two diverged in 0.149.2/0.149.1 every fresh
+# install showed a false "update available" banner, which is why they may
+# differ by the suffix and by nothing else.
 if ! upstream_base_tag="$(node -p "(require('./npm-package/package.json').description.match(/rust-v[0-9]+\\.[0-9]+\\.[0-9]+/)||[''])[0]")"; then
   upstream_base_tag=
 fi
@@ -630,7 +662,7 @@ else
   fi
 fi
 if [ -n "$cargo_workspace_version" ] \
-  && [ "$cargo_workspace_version" = "$npm_package_version" ] \
+  && [ "$fork_version_matches" = "1" ] \
   && { [ "$base_verification" = "verified" ] || [ "$base_verification" = "unverified-allowed" ]; } \
   && [ -f ".release/v${npm_package_version}.md" ] \
   && grep -q "^# \[${npm_package_version}\]" CHANGELOG.md \
